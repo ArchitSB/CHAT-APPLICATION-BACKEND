@@ -13,8 +13,14 @@ const messageSchema = new mongoose.Schema({
             type: String,
             required: true,
         },
+        timestamp: {
+            type: Date,
+            default: Date.now,
+        }
 },
 { timestamps: true}
 );
 
-module.exports = mongoose.model("Messages", messageSchema);
+const Messages =  mongoose.model("Messages", messageSchema);
+
+module.exports = Messages;

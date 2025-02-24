@@ -23,8 +23,12 @@ app.use(cors());
 app.use(express.json());
 
 
-mongoose.connect(process.env.MONGO_URI).then(() => console.log("Mongodb Connected.")).catch((
-    error) => console.error(error));
+mongoose.connect(process.env.MONGO_URI)
+    .then(() => console.log("Mongodb Connected."))
+    .catch((error) => {
+        console.error("MongoDB connection error:",error);
+        process.exit(1);
+    });
 
 app.use("/auth", authRoutes);
 
@@ -33,10 +37,35 @@ io.on("connection", (socket) => {
     console.log("User connected", socket.id);
 
     socket.on("send_message", async(data) => {
-        const {sender, receiver, message} = data;
-        const newMessage = new Messages({sender, receiver, message});
-        await newMessage.save();
-        socket.broadcast.emit("receive_message", data);
+        try{
+            const {sender, receiver, message} = data;
+            const newMessage = new Messages({
+                sender, 
+                receiver, 
+                message,
+                timestamp: new Date(),
+            });
+            await newMessage.save();
+            // Emit to all connected clients except sender
+            socket.broadcast.emit("receive_message", {
+                sender,
+                receiver,
+                message,
+                _id: newMessage._id,
+                timestamp: newMessage.timestamp
+            });
+            // Emit to the sender only
+            socket.emit("message_sent", {
+                sender,
+                receiver,
+                message,
+                _id: newMessage._id,
+                timestamp: newMessage.timestamp
+            });
+        }catch(error){
+            console.error("Error saving message:", error);
+            socket.emit("message_error", { error: "Failed to send message" });
+        }
     });
 
     socket.on ("disconnect", () =>{
@@ -46,13 +75,20 @@ io.on("connection", (socket) => {
 
 app.get("/messages", async(req,res) => {
     const {sender, receiver} = req.query;
+
+    if (!sender || !receiver) {
+        return res.status(400).json({ message: "Sender and receiver are required" });
+    }
+
     try{
         const messages = await Messages.find({
             $or: [
                 {sender, receiver}, 
                 {sender: receiver, receiver: sender},
             ],
-        }).sort({createdAt: 1});
+        }).sort({timestamp: 1})
+        .select('-__v');
+
         res.json(messages);
     }catch(error){
         res.status(500).json({ message: "Error fetching messages"});
@@ -71,4 +107,4 @@ app.get("/users", async(req,res) => {
 
 
 const PORT = process.env.PORT || 5001;
-app.listen(PORT, ()=> console.log(`Server listening on port ${PORT}`));
+server.listen(PORT, ()=> console.log(`Server listening on port ${PORT}`));
